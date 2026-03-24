@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/andot/bcfntconv/pkg/convert"
 )
@@ -16,17 +17,24 @@ func main() {
 	// Defaults: input -> ./shared_font.bin, output -> ./output.bcfnt
 	in := "shared_font.bin"
 	out := "output.bcfnt"
-	switch len(os.Args) {
-	case 1:
-		// no args: use defaults
-	case 2:
-		in = os.Args[1]
-	case 3:
-		in = os.Args[1]
-		out = os.Args[2]
-	default:
+	args := os.Args[1:]
+	if len(args) > 2 {
 		usage()
 		os.Exit(2)
+	}
+	for _, a := range args {
+		ext := strings.ToLower(filepath.Ext(a))
+		switch ext {
+		case ".bin":
+			in = a
+		case ".bcfnt":
+			out = a
+		default:
+			// if user provided one arg without extension, assume it's the output and append .bcfnt
+			if ext == "" && len(args) == 1 {
+				out = a + ".bcfnt"
+			}
+		}
 	}
 
 	data, err := os.ReadFile(in)
