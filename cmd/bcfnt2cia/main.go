@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -18,7 +19,20 @@ const TitleID = "0004009B00014002"
 const ncchHeaderB64 = `My7n5mvi9dmDk1nJf2l7Y5NReYj2tur5QWOdzYCk33ipxX5UHj1teYK5JqA0shkuXySoYwCL5R1uvfiHBZUOU9TPUyk2mDCa69dPh89UC4b/to8p3wtBxmUqCfKV89ZA8dWJHvo+yIllLjMsKIyV6q5vyUNPzBYVBXblTgoMOdK8nKZFFsP+IsRCFWNFTphITt3IPD7YlGvdE+/tSrjXxUEC+6PCW44+B7NTvz4j7Pudl8oTmKbwtmG7hPVczwBVDidsXOWh3jf75NvfeEk+HW+ozxDkJjTu/W46KfM7pMgQO+wmDFwHUE912NpxqDx0ZwN68ooZsb9ewM0qzNdkrk5DQ0gxCwAAAkABAJsABAAwMAAAAAAAAAJAAQCbAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ1RSLVAtQ1RBUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAADALAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOpiDT/0YhpjTCPEb880qpb7R2Cqv2I5ab+HfciO7e3I=`
 
 func runCmd(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	// Prefer tools located next to this executable (same directory) if present.
+	exePath, err := os.Executable()
+	tool := name
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		// check for name.exe and name in exeDir
+		cand := filepath.Join(exeDir, name)
+		if _, err2 := os.Stat(cand); err2 == nil {
+			tool = cand
+		} else if _, err2 := os.Stat(cand + ".exe"); err2 == nil {
+			tool = cand + ".exe"
+		}
+	}
+	cmd := exec.Command(tool, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -90,8 +104,32 @@ func main() {
 	}
 
 	// ensure input exists
-	if _, err := os.Stat(input); err != nil {
+	fi, err := os.Stat(input)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Font file does not exist: %v\n", err)
+		exitWithCleanup(1)
+	}
+
+	// validate bcfnt size: must be <= 0x332000 - 0x80
+	if fi.Size() > int64(0x332000-0x80) {
+		fmt.Fprintf(os.Stderr, "bcfnt validation failed: file too large to convert\n")
+		exitWithCleanup(1)
+	}
+
+	// validate header: first 4 bytes must be "CFNT"
+	f, err := os.Open(input)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open input: %v\n", err)
+		exitWithCleanup(1)
+	}
+	defer f.Close()
+	sig := make([]byte, 4)
+	if _, err := f.Read(sig); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read input header: %v\n", err)
+		exitWithCleanup(1)
+	}
+	if !bytes.Equal(sig, []byte("CFNT")) {
+		fmt.Fprintf(os.Stderr, "bcfnt validation failed: missing CFNT header\n")
 		exitWithCleanup(1)
 	}
 
@@ -116,25 +154,19 @@ func main() {
 	}
 
 	// write embedded ncchheader to disk
-	hdr, err := base64.StdEncoding.DecodeString(ncchHeaderB64)
+	ncchHdr, err := base64.StdEncoding.DecodeString(ncchHeaderB64)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to decode embedded ncch header: %v\n", err)
 		exitWithCleanup(1)
 	}
-	if err := os.WriteFile("ncchheader.bin", hdr, 0644); err != nil {
+	if err := os.WriteFile("ncchheader.bin", ncchHdr, 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write embedded ncchheader: %v\n", err)
 		exitWithCleanup(1)
 	}
 
-	// build cfa (prefer xor if xorpad present)
+	// build cfa
 	fmt.Println("Building .cfa with 3dstool...")
 	cfaArgs := []string{"-c", "-v", "-t", "cfa", "-f", fmt.Sprintf("%s.cfa", stringsTrimExt(output)), "--header", "ncchheader.bin", "--romfs", "romfs-mod.bin"}
-	xorpad := TitleID + ".Main.romfs.xorpad"
-	if _, err := os.Stat(xorpad); err == nil {
-		cfaArgs = append(cfaArgs, "--xor", xorpad)
-	} else {
-		fmt.Fprintf(os.Stderr, "Warning: xorpad %s not found; building unencrypted CFA\n", xorpad)
-	}
 
 	if err := runCmd("3dstool", cfaArgs...); err != nil {
 		fmt.Fprintf(os.Stderr, "3dstool cfa build failed: %v\n", err)
@@ -176,14 +208,6 @@ func fixCFA(cfaPath string) error {
 		return err
 	}
 	defer f.Close()
-
-	// always write xor flag byte
-	if _, err := f.Seek(0x18F, 0); err != nil {
-		return err
-	}
-	if _, err := f.Write([]byte{0x00}); err != nil {
-		return err
-	}
 
 	// write romfs size at 0x1B4 (little endian)
 	if _, err := f.Seek(0x1B4, 0); err != nil {

@@ -18,6 +18,11 @@ func BcfntToShared(b []byte) ([]byte, error) {
 		return nil, errors.New("bcfnt validation failed: missing CFNT header")
 	}
 
+	// Reject excessively large bcfnt files that cannot be converted.
+	// Limit derived from platform constraints: max bcfnt size = 0x332000 - header
+	if len(b) > 0x332000-HeaderSize {
+		return nil, errors.New("bcfnt validation failed: file too large to convert")
+	}
 	// modify copy
 	mod := make([]byte, len(b))
 	copy(mod, b)
