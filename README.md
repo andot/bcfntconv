@@ -1,4 +1,4 @@
-# shared-font-converter
+# bcfntconv
 
 工具：将 Nintendo 3DS 的 `bcfnt` 与模拟器使用的 `shared_font.bin` 相互转换。
 

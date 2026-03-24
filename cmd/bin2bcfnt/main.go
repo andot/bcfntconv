@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andot/shared-font-converter/pkg/convert"
+	"github.com/andot/bcfntconv/pkg/convert"
 )
 
 func usage() {

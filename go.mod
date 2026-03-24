@@ -1,3 +1,3 @@
-module github.com/andot/shared-font-converter
+module github.com/andot/bcfntconv
 
 go 1.20
